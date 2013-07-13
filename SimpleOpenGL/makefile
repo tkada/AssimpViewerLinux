@@ -16,14 +16,14 @@ VPATH = ./usr/include/
 INCLUDEFLAGS = -I/usr/local/include
 
 # Library flags for gcc
-LIBFLAGS = -L../../bin/gcc -L/usr/local/lib
+LIBFLAGS = -L/usr/local/lib
 
 # Output name of executable
 OUTPUT = samplegl
 
 all:	$(OBJECTS)
 #	cd ../../code/ && $(MAKE) static 
-	gcc -g -o $(OUTPUT) $(INCLUDEFLAGS) -s Sample_SimpleOpenGL.c $(LIBFLAGS) -Wl,-Bstatic -Wl,-Bdynamic -lstdc++ -lglut -lassimp -lGL -lGLU
+	gcc -g -o $(OUTPUT) $(INCLUDEFLAGS) -s Sample_SimpleOpenGL.cpp $(LIBFLAGS) -Wl,-Bstatic -Wl,-Bdynamic -lstdc++ -lglut -lassimp -lGL -lGLU
 .PHONY: clean
 clean:
 	-rm $(OUTPUT)
