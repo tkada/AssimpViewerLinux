@@ -4,7 +4,7 @@ AssimpViewerLinux
 Assimp Viewer on Linux
 
 
-This program is enable to view the textured model on Linux plattform.
+This program is enable to view the textured model on Linux platform.
 
 
 This program requires below libraries.
