@@ -1,23 +1,24 @@
-// ----------------------------------------------------------------------------
-// Simple sample to prove that Assimp is easy to use with OpenGL.
-// It takes a file name as command line parameter, loads it using standard
-// settings and displays it.
-//
-// If you intend to _use_ this code sample in your app, do yourself a favour 
-// and replace immediate mode calls with VBOs ...
-//
-// The vc8 solution links against assimp-release-dll_win32 - be sure to
-// have this configuration built.
-// ----------------------------------------------------------------------------
+/**
+	Assimp Viewer on Linux
+*/
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include <GL/glut.h>
+
+#include <IL/il.h>
 
 // assimp include files. These three are usually needed.
 #include <assimp/cimport.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+
+#include <assimp/Importer.hpp>	//OO version Header!
+#include <assimp/DefaultLogger.hpp>
+#include <assimp/LogStream.hpp>
+#include <map>
+#include <fstream>
 
 // the global Assimp scene object
 const aiScene* scene = NULL;
@@ -29,6 +30,171 @@ static float angle = 0.f;
 
 #define aisgl_min(x,y) (x<y?x:y)
 #define aisgl_max(x,y) (y>x?y:x)
+
+// images / texture
+std::map<std::string, GLuint*> textureIdMap;	// map image filenames to textureIds
+GLuint*		textureIds;							// pointer to texture Array
+
+// Create an instance of the Importer class
+Assimp::Importer importer;
+
+// currently these are hardcoded
+static std::string basepath = "./Collada/";
+static std::string modelname = "COLLADA.dae";
+
+GLfloat LightAmbient[]= { 0.5f, 0.5f, 0.5f, 1.0f };
+GLfloat LightDiffuse[]= { 1.0f, 1.0f, 1.0f, 1.0f };
+GLfloat LightPosition[]= { 0.0f, 0.0f, 15.0f, 1.0f };
+
+
+
+GLboolean abortGLInit(const char* abortMessage)
+{
+	printf("ERROR(%s)\n",abortMessage);
+	return false;									// quit and return False
+}
+
+
+
+void ReSizeGLScene(GLsizei width, GLsizei height)				// Resize And Initialize The GL Window
+{
+	if (height==0)								// Prevent A Divide By Zero By
+	{
+		height=1;							// Making Height Equal One
+	}
+
+	glViewport(0, 0, width, height);					// Reset The Current Viewport
+
+	glMatrixMode(GL_PROJECTION);						// Select The Projection Matrix
+	glLoadIdentity();							// Reset The Projection Matrix
+
+	// Calculate The Aspect Ratio Of The Window
+	gluPerspective(45.0f,(GLfloat)width/(GLfloat)height,0.1f,10000.0f);
+
+	glMatrixMode(GL_MODELVIEW);						// Select The Modelview Matrix
+	glLoadIdentity();							// Reset The Modelview Matrix
+}
+
+int LoadGLTextures(const aiScene* scene)
+{
+	ILboolean success;
+
+	/* Before calling ilInit() version should be checked. */
+	if (ilGetInteger(IL_VERSION_NUM) < IL_VERSION)
+	{
+		ILint test = ilGetInteger(IL_VERSION_NUM);
+		/// wrong DevIL version ///
+		std::string err_msg = "Wrong DevIL version. Old devil.dll in system32/SysWow64?";
+		char* cErr_msg = (char *) err_msg.c_str();
+		abortGLInit(cErr_msg);
+		return -1;
+	}
+
+	ilInit(); /* Initialization of DevIL */
+
+	if (scene->HasTextures()) abortGLInit("Support for meshes with embedded textures is not implemented");
+
+	/* getTexture Filenames and Numb of Textures */
+	for (unsigned int m=0; m<scene->mNumMaterials; m++)
+	{
+		int texIndex = 0;
+		aiReturn texFound = AI_SUCCESS;
+
+		aiString path;	// filename
+
+		while (texFound == AI_SUCCESS)
+		{
+			texFound = scene->mMaterials[m]->GetTexture(aiTextureType_DIFFUSE, texIndex, &path);
+			textureIdMap[path.data] = NULL; //fill map with textures, pointers still NULL yet
+			texIndex++;
+		}
+	}
+
+	int numTextures = textureIdMap.size();
+
+	/* array with DevIL image IDs */
+	ILuint* imageIds = NULL;
+	imageIds = new ILuint[numTextures];
+
+	/* generate DevIL Image IDs */
+	ilGenImages(numTextures, imageIds); /* Generation of numTextures image names */
+
+	/* create and fill array with GL texture ids */
+	textureIds = new GLuint[numTextures];
+	glGenTextures(numTextures, textureIds); /* Texture name generation */
+
+	/* define texture path */
+	//std::string texturepath = "../../../test/models/Obj/";
+
+	/* get iterator */
+	std::map<std::string, GLuint*>::iterator itr = textureIdMap.begin();
+
+	for (int i=0; i<numTextures; i++)
+	{
+
+		//save IL image ID
+		std::string filename = (*itr).first;  // get filename
+		(*itr).second =  &textureIds[i];	  // save texture id for filename in map
+		itr++;								  // next texture
+
+		if( filename == "" )
+		{
+			continue;
+		}
+
+		ilBindImage(imageIds[i]); /* Binding of DevIL image name */
+		std::string fileloc = basepath + filename;	/* Loading of image */
+		
+		//Charactor code translate.
+		int pos = fileloc.find("\\" );
+		if( pos >= 0 )
+		{
+			fileloc.replace( pos , 1 , "/" );
+		}
+		
+		success = ilLoadImage(fileloc.c_str());
+
+		if (success) /* If no error occured: */
+		{
+			success = ilConvertImage(IL_RGB, IL_UNSIGNED_BYTE); /* Convert every colour component into
+			unsigned byte. If your image contains alpha channel you can replace IL_RGB with IL_RGBA */
+			if (!success)
+			{
+				/* Error occured */
+				abortGLInit("Couldn't convert image");
+				return -1;
+			}
+			//glGenTextures(numTextures, &textureIds[i]); /* Texture name generation */
+			glBindTexture(GL_TEXTURE_2D, textureIds[i]); /* Binding of texture name */
+			//redefine standard texture values
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); /* We will use linear
+			interpolation for magnification filter */
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); /* We will use linear
+			interpolation for minifying filter */
+			glTexImage2D(GL_TEXTURE_2D, 0, ilGetInteger(IL_IMAGE_BPP), ilGetInteger(IL_IMAGE_WIDTH),
+				ilGetInteger(IL_IMAGE_HEIGHT), 0, ilGetInteger(IL_IMAGE_FORMAT), GL_UNSIGNED_BYTE,
+				ilGetData()); /* Texture specification */
+		}
+		else
+		{
+			/* Error occured */
+			printf("%s(%d)Couldn't load Image: %s\n",__FILE__,__LINE__,fileloc.c_str() );
+		}
+
+
+	}
+
+	ilDeleteImages(numTextures, imageIds); /* Because we have already copied image data into texture data
+	we can release memory used by image. */
+
+	//Cleanup
+	delete [] imageIds;
+	imageIds = NULL;
+
+	//return success;
+	return true;
+}
+
 
 // ----------------------------------------------------------------------------
 void reshape(int width, int height)
@@ -78,7 +244,7 @@ void get_bounding_box_for_node (const aiNode* nd,
 }
 
 // ----------------------------------------------------------------------------
-void get_bounding_box (aiVector3D* min, aiVector3D* max)
+void get_bounding_box ( aiVector3D* min, aiVector3D* max)
 {
 	aiMatrix4x4 trafo;
 	aiIdentityMatrix4(&trafo);
@@ -86,6 +252,12 @@ void get_bounding_box (aiVector3D* min, aiVector3D* max)
 	min->x = min->y = min->z =  1e10f;
 	max->x = max->y = max->z = -1e10f;
 	get_bounding_box_for_node(scene->mRootNode,min,max,&trafo);
+}
+
+// Can't send color down as a pointer to aiColor4D because AI colors are ABGR.
+void Color4f(const aiColor4D *color)
+{
+	glColor4f(color->r, color->g, color->b, color->a);
 }
 
 // ----------------------------------------------------------------------------
@@ -120,7 +292,17 @@ void apply_material(const aiMaterial *mtl)
 	float shininess, strength;
 	int two_sided;
 	int wireframe;
-	unsigned int max;
+	unsigned int max;	// changed: to unsigned
+
+	int texIndex = 0;
+	aiString texPath;	//contains filename of texture
+
+	if(AI_SUCCESS == mtl->GetTexture(aiTextureType_DIFFUSE, texIndex, &texPath))
+	{
+		//bind texture
+		unsigned int texId = *textureIdMap[texPath.data];
+		glBindTexture(GL_TEXTURE_2D, texId);
+	}
 
 	set_float4(c, 0.8f, 0.8f, 0.8f, 1.0f);
 	if(AI_SUCCESS == aiGetMaterialColor(mtl, AI_MATKEY_COLOR_DIFFUSE, &diffuse))
@@ -144,14 +326,10 @@ void apply_material(const aiMaterial *mtl)
 
 	max = 1;
 	ret1 = aiGetMaterialFloatArray(mtl, AI_MATKEY_SHININESS, &shininess, &max);
-	if(ret1 == AI_SUCCESS) {
-    	max = 1;
-    	ret2 = aiGetMaterialFloatArray(mtl, AI_MATKEY_SHININESS_STRENGTH, &strength, &max);
-		if(ret2 == AI_SUCCESS)
-			glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess * strength);
-        else
-        	glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess);
-    }
+	max = 1;
+	ret2 = aiGetMaterialFloatArray(mtl, AI_MATKEY_SHININESS_STRENGTH, &strength, &max);
+	if((ret1 == AI_SUCCESS) && (ret2 == AI_SUCCESS))
+		glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess * strength);
 	else {
 		glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 0.0f);
 		set_float4(c, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -167,40 +345,59 @@ void apply_material(const aiMaterial *mtl)
 
 	max = 1;
 	if((AI_SUCCESS == aiGetMaterialIntegerArray(mtl, AI_MATKEY_TWOSIDED, &two_sided, &max)) && two_sided)
-		glDisable(GL_CULL_FACE);
-	else 
 		glEnable(GL_CULL_FACE);
+	else
+		glDisable(GL_CULL_FACE);
 }
 
-// ----------------------------------------------------------------------------
-void recursive_render (const aiScene *sc, const aiNode* nd)
+
+void recursive_render (const struct aiScene *sc, const struct aiNode* nd, float scale)
 {
 	unsigned int i;
-	unsigned int n = 0, t;
+	unsigned int n=0, t;
 	aiMatrix4x4 m = nd->mTransformation;
 
+	m.Scaling(aiVector3D(scale, scale, scale), m);
+
 	// update transform
-	aiTransposeMatrix4(&m);
+	m.Transpose();
 	glPushMatrix();
 	glMultMatrixf((float*)&m);
 
 	// draw all meshes assigned to this node
-	for (; n < nd->mNumMeshes; ++n) {
-		const aiMesh* mesh = scene->mMeshes[nd->mMeshes[n]];
+	for (; n < nd->mNumMeshes; ++n)
+	{
+		const struct aiMesh* mesh = scene->mMeshes[nd->mMeshes[n]];
 
 		apply_material(sc->mMaterials[mesh->mMaterialIndex]);
 
-		if(mesh->mNormals == NULL) {
+
+		if(mesh->mNormals == NULL)
+		{
 			glDisable(GL_LIGHTING);
-		} else {
+		}
+		else
+		{
 			glEnable(GL_LIGHTING);
 		}
 
+		if(mesh->mColors[0] != NULL)
+		{
+			glEnable(GL_COLOR_MATERIAL);
+		}
+		else
+		{
+			glDisable(GL_COLOR_MATERIAL);
+		}
+
+
+
 		for (t = 0; t < mesh->mNumFaces; ++t) {
-			const aiFace* face = &mesh->mFaces[t];
+			const struct aiFace* face = &mesh->mFaces[t];
 			GLenum face_mode;
 
-			switch(face->mNumIndices) {
+			switch(face->mNumIndices)
+			{
 				case 1: face_mode = GL_POINTS; break;
 				case 2: face_mode = GL_LINES; break;
 				case 3: face_mode = GL_TRIANGLES; break;
@@ -209,23 +406,33 @@ void recursive_render (const aiScene *sc, const aiNode* nd)
 
 			glBegin(face_mode);
 
-			for(i = 0; i < face->mNumIndices; i++) {
-				int index = face->mIndices[i];
+			for(i = 0; i < face->mNumIndices; i++)		// go through all vertices in face
+			{
+				int vertexIndex = face->mIndices[i];	// get group index for current index
 				if(mesh->mColors[0] != NULL)
-					glColor4fv((GLfloat*)&mesh->mColors[0][index]);
-				if(mesh->mNormals != NULL) 
-					glNormal3fv(&mesh->mNormals[index].x);
-				glVertex3fv(&mesh->mVertices[index].x);
+					Color4f(&mesh->mColors[0][vertexIndex]);
+				if(mesh->mNormals != NULL)
+
+					if(mesh->HasTextureCoords(0))		//HasTextureCoords(texture_coordinates_set)
+					{
+						glTexCoord2f(mesh->mTextureCoords[0][vertexIndex].x, mesh->mTextureCoords[0][vertexIndex].y); //mTextureCoords[channel][vertex]
+					}
+
+					glNormal3fv(&mesh->mNormals[vertexIndex].x);
+					glVertex3fv(&mesh->mVertices[vertexIndex].x);
 			}
 
 			glEnd();
+
 		}
 
 	}
 
+
 	// draw all children
-	for (n = 0; n < nd->mNumChildren; ++n) {
-		recursive_render(sc, nd->mChildren[n]);
+	for (n = 0; n < nd->mNumChildren; ++n)
+	{
+		recursive_render(sc, nd->mChildren[n], scale);
 	}
 
 	glPopMatrix();
@@ -235,10 +442,22 @@ void recursive_render (const aiScene *sc, const aiNode* nd)
 void do_motion (void)
 {
 	static GLint prev_time = 0;
+	static GLint prev_fps_time = 0;
+	static int frames = 0;
 
 	int time = glutGet(GLUT_ELAPSED_TIME);
 	angle += (time-prev_time)*0.01;
 	prev_time = time;
+
+	frames += 1;
+	if ((time - prev_fps_time) > 1000) // update every seconds
+    {
+        int current_fps = frames * 1000 / (time - prev_fps_time);
+        printf("%d fps\n", current_fps);
+        frames = 0;
+        prev_fps_time = time;
+    }
+
 
 	glutPostRedisplay ();
 }
@@ -266,7 +485,7 @@ void display(void)
 
         // center the model
 	glTranslatef( -scene_center.x, -scene_center.y, -scene_center.z );
-
+	
         // if the display list has not been made yet, create a new one and
         // fill it with scene contents
 	if(scene_list == 0) {
@@ -275,7 +494,7 @@ void display(void)
             // now begin at the root node of the imported data and traverse
             // the scenegraph by multiplying subsequent local transforms
             // together on GL's matrix stack.
-	    recursive_render(scene, scene->mRootNode);
+	    recursive_render(scene, scene->mRootNode , 1.0);
 	    glEndList();
 	}
 
@@ -286,34 +505,88 @@ void display(void)
 	do_motion();
 }
 
-// ----------------------------------------------------------------------------
-int loadasset (const char* path)
+int InitGL()					 // All Setup For OpenGL goes here
 {
-	// we are taking one of the postprocessing presets to avoid
-	// spelling out 20+ single postprocessing flags here.
-	scene = aiImportFile(path,aiProcessPreset_TargetRealtime_MaxQuality);
-
-	if (scene) {
-		get_bounding_box(&scene_min,&scene_max);
-		scene_center.x = (scene_min.x + scene_max.x) / 2.0f;
-		scene_center.y = (scene_min.y + scene_max.y) / 2.0f;
-		scene_center.z = (scene_min.z + scene_max.z) / 2.0f;
-		return 0;
+	if (!LoadGLTextures(scene))
+	{
+		return false;
 	}
-	return 1;
+
+
+	glEnable(GL_TEXTURE_2D);
+	glShadeModel(GL_SMOOTH);		 // Enables Smooth Shading
+	glClearColor(1.0f, 1.0f, 1.0f, 0.0f);
+	glClearDepth(1.0f);				// Depth Buffer Setup
+	glEnable(GL_DEPTH_TEST);		// Enables Depth Testing
+	glDepthFunc(GL_LEQUAL);			// The Type Of Depth Test To Do
+	glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);	// Really Nice Perspective Calculation
+
+
+	glEnable(GL_LIGHTING);
+	glEnable(GL_LIGHT0);    // Uses default lighting parameters
+	glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
+	glEnable(GL_NORMALIZE);
+
+	glLightfv(GL_LIGHT1, GL_AMBIENT, LightAmbient);
+	glLightfv(GL_LIGHT1, GL_DIFFUSE, LightDiffuse);
+	glLightfv(GL_LIGHT1, GL_POSITION, LightPosition);
+	glEnable(GL_LIGHT1);
+
+	//glColorMaterial(GL_FRONT_AND_BACK, GL_DIFFUSE);
+
+
+	return true;					// Initialization Went OK
 }
+
+bool Import3DFromFile( const std::string& pFile)
+{
+	//check if file exists
+	std::ifstream fin(pFile.c_str());
+	if(!fin.fail())
+	{
+		fin.close();
+	}
+	else
+	{
+		printf("Couldn't open file: %s\n" ,pFile.c_str() );
+		return false;
+	}
+
+	scene = importer.ReadFile( pFile, aiProcessPreset_TargetRealtime_Quality);
+
+	// If the import failed, report it
+	if( !scene)
+	{
+		printf("%s\n", importer.GetErrorString());
+		return false;
+	}
+	
+	get_bounding_box(&scene_min,&scene_max);
+	scene_center.x = (scene_min.x + scene_max.x) / 2.0f;
+	scene_center.y = (scene_min.y + scene_max.y) / 2.0f;
+	scene_center.z = (scene_min.z + scene_max.z) / 2.0f;
+
+	// Now we can access the file's contents.
+	printf("Import of scene %s succeeded\n",pFile.c_str());
+
+	// We're done. Everything will be cleaned up by the importer destructor
+	return true;
+}
+
 
 // ----------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
 	aiLogStream stream;
+	
+	ilInit(); /* Initialization of DevIL */
 
 	glutInitWindowSize(900,600);
 	glutInitWindowPosition(100,100);
 	glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
 	glutInit(&argc, argv);
 
-	glutCreateWindow("Assimp - Very simple OpenGL sample");
+	glutCreateWindow("Assimp - OpenGL Sample on Linux");
 	glutDisplayFunc(display);
 	glutReshapeFunc(reshape);
 
@@ -332,11 +605,38 @@ int main(int argc, char **argv)
 	// is specified, we try to locate one of the more expressive test 
 	// models from the repository (/models-nonbsd may be missing in 
 	// some distributions so we need a fallback from /models!).
-	if( 0 != loadasset( argc >= 2 ? argv[1] : "../../test/models-nonbsd/X/dwarf.x")) {
-		if( argc != 1 || (0 != loadasset( "../../../../test/models-nonbsd/X/dwarf.x") && 0 != loadasset( "../../test/models/X/Testwuson.X"))) { 
+	//std::string FileName = basepath+modelname;
+	//loadasset( FileName.c_str() );
+	
+	if( argc == 2 )
+	{
+		std::string input = argv[1];
+		int sep = input.find_last_of( "/" );
+		basepath = input.substr(0,sep+1);
+		modelname = input.substr( sep+1 );
+		//printf("%s : %s\n",basepath.c_str(),modelname.c_str());
+		
+		if (!Import3DFromFile(argv[1]))
+		{
+			printf("%d ERROR\n",__LINE__);
 			return -1;
 		}
 	}
+	else
+	{
+		if (!Import3DFromFile(basepath+modelname))
+		{
+			printf("%d ERROR\n",__LINE__);
+			return -1;
+		}
+	}
+	
+	if( !InitGL() )
+	{
+		printf("%d ERROR\n",__LINE__);
+		return -1;
+	}
+
 
 	glClearColor(0.1f,0.1f,0.1f,1.f);
 

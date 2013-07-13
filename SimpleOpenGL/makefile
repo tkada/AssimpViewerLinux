@@ -23,7 +23,7 @@ OUTPUT = samplegl
 
 all:	$(OBJECTS)
 #	cd ../../code/ && $(MAKE) static 
-	gcc -g -o $(OUTPUT) $(INCLUDEFLAGS) -s Sample_SimpleOpenGL.cpp $(LIBFLAGS) -Wl,-Bstatic -Wl,-Bdynamic -lstdc++ -lglut -lassimp -lGL -lGLU
+	gcc -g -o $(OUTPUT) $(INCLUDEFLAGS) -s Sample_SimpleOpenGL.cpp $(LIBFLAGS) -Wl,-Bstatic -Wl,-Bdynamic -lstdc++ -lglut -lassimp -lGL -lGLU -lIL
 .PHONY: clean
 clean:
 	-rm $(OUTPUT)
